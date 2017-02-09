@@ -1,0 +1,8 @@
+sender     = "sender@example.com"
+recipient  = "test@example.com"
+server     = "smtp.example.com"
+port       = 25
+subject    = "test email"
+body       = "test email"
+# user       = ""
+# password   = ""
