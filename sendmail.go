@@ -1,7 +1,7 @@
 /*
  * HOW TO BUILD:
  * > go get gopkg.in/gomail.v2
- * > go get github.com/BurntSushi/toml
+ * > go get gopkg.in/yaml.v2
  * > go build
  */
 package main
@@ -13,8 +13,8 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/BurntSushi/toml"
 	"gopkg.in/gomail.v2"
+	"gopkg.in/yaml.v2"
 )
 
 func isEmpty(str string) bool {
@@ -24,110 +24,97 @@ func isEmpty(str string) bool {
 
 // Config : app conf
 type Config struct {
-	sender    string
-	recipient string
-	server    string
-	port      int
-	subject   string
-	body      string
-	user      string
-	password  string
+	Sender    string `yaml:"sender"`
+	Recipient string `yaml:"recipient"`
+	Server    string `yaml:"server"`
+	Port      int    `yaml:"port"`
+	Subject   string `yaml:"subject"`
+	Body      string `yaml:"body"`
+	User      string `yaml:"user"`
+	Password  string `yaml:"password"`
 }
 
 func main() {
 
 	// default parameters
 	var conf = Config{
-		sender:    "sender@example.com",
-		recipient: "recipient@example.com",
-		server:    "smtp.example.com",
-		port:      25,
-		subject:   "Email subject",
-		body:      "Email body",
-		user:      "",
-		password:  "",
+		Sender:    "sender@example.com",
+		Recipient: "recipient@example.com",
+		Server:    "smtp.example.com",
+		Port:      25,
+		Subject:   "Email subject",
+		Body:      "Email body",
+		User:      "",
+		Password:  "",
 	}
 
 	readConfFile(&conf)
 
-	parseArguments(&conf)
+	sender := flag.String("from", conf.Sender, "sender email address")
+	recipient := flag.String("to", conf.Recipient, "recipient email address")
+	server := flag.String("server", conf.Server, "smtp server address")
+	port := flag.Int("port", conf.Port, "smtp server port")
+	body := flag.String("body", conf.Body, "email body")
+	subject := flag.String("subject", conf.Subject, "email subject")
+	user := flag.String("user", conf.User, "authentication user")
+	password := flag.String("password", conf.Password, "authentication password")
+	flag.Parse()
 
-	fmt.Printf("%+v\n", conf)
-	fmt.Printf("CONNECTING TO: %s:%d\n", conf.server, conf.port)
-	fmt.Printf("FROM: %s\n", conf.sender)
-	fmt.Printf("TO: %s\n", conf.recipient)
-	fmt.Printf("SUBJECT: %s\n", conf.subject)
-	fmt.Printf("BODY: %s\n", conf.body)
+	conf.Sender = *sender
+	conf.Recipient = *recipient
+	conf.Server = *server
+	conf.Port = *port
+	conf.Body = *body
+	conf.Subject = *subject
+	conf.User = *user
+	conf.Password = *password
 
+	fmt.Printf("CONNECTING TO: %s:%d\n", conf.Server, conf.Port)
+	fmt.Printf("FROM: %s\n", conf.Sender)
+	fmt.Printf("TO: %s\n", conf.Recipient)
+	fmt.Printf("SUBJECT: %s\n", conf.Subject)
+	fmt.Printf("BODY: %s\n", conf.Body)
 	// authentication send
-	if !isEmpty(conf.user) {
-		fmt.Printf("user: %s\n", conf.user)
-		if !isEmpty(conf.password) {
+	if !isEmpty(conf.User) {
+		fmt.Printf("user: %s\n", conf.User)
+		if !isEmpty(conf.Password) {
 			fmt.Printf("password: ***\n")
 		}
-		fmt.Printf("\n\n")
-		sendAuth(conf.server, conf.port, conf.sender, conf.recipient, conf.subject, conf.body, conf.user, conf.password)
-		return
 	}
 
 	// without authentication
 	fmt.Printf("\n\n")
-	send(conf.server, conf.port, conf.sender, conf.recipient, conf.subject, conf.body)
-	return
+	send(conf)
 }
 
 func readConfFile(conf *Config) {
 	// read conf file
-	tomlData, err := ioutil.ReadFile("sendmail.toml")
+	yamlData, err := ioutil.ReadFile("sendmail.yml")
 	if err != nil {
 		fmt.Printf("error reading configuration file:\n\t%s\n", err)
 	} else {
 		// se il file è stato letto
-		_, err := toml.Decode(string(tomlData), &conf)
+		err := yaml.Unmarshal(yamlData, &conf)
+		fmt.Printf("\n\nconf file %v\n\n", conf.Sender)
 		if err != nil {
 			panic(err)
 		}
 	}
 }
 
-func parseArguments(conf *Config) {
-	conf.sender = *flag.String("from", conf.sender, "sender email address")
-	conf.recipient = *flag.String("to", conf.recipient, "recipient email address")
-	conf.server = *flag.String("server", conf.server, "smtp server address")
-	conf.port = *flag.Int("port", conf.port, "smtp server port")
-	conf.body = *flag.String("body", conf.body, "email body")
-	conf.subject = *flag.String("subject", conf.subject, "email subject")
-	conf.user = *flag.String("user", conf.user, "authentication user")
-	conf.password = *flag.String("password", conf.password, "authentication password")
-	flag.Parse()
-}
-
-func send(smtpServerAddress string, smtpServerPort int, sender string, recipient string, subject string, body string) {
+func send(conf Config) {
 	m := gomail.NewMessage()
-	m.SetHeader("From", sender)
-	m.SetHeader("To", recipient)
-	m.SetHeader("Subject", subject)
-	m.SetBody("text/plain", body)
+	m.SetHeader("From", conf.Sender)
+	m.SetHeader("To", conf.Recipient)
+	m.SetHeader("Subject", conf.Subject)
+	m.SetBody("text/plain", conf.Body)
 
-	d := gomail.Dialer{Host: smtpServerAddress, Port: smtpServerPort}
-	if err := d.DialAndSend(m); err != nil {
-		fmt.Println(err)
-		fmt.Println("")
-		fmt.Println("")
+	var d *gomail.Dialer
+	if isEmpty(conf.User) {
+		d = &gomail.Dialer{Host: conf.Server, Port: conf.Port}
+	} else {
+		d = gomail.NewDialer(conf.Server, conf.Port, conf.User, conf.Password)
 	}
-
-	fmt.Print("Press 'Enter' to continue...")
-	bufio.NewReader(os.Stdin).ReadBytes('\n')
-}
-
-func sendAuth(smtpServerAddress string, smtpServerPort int, sender string, recipient string, subject string, body string, user string, password string) {
-	m := gomail.NewMessage()
-	m.SetHeader("From", sender)
-	m.SetHeader("To", recipient)
-	m.SetHeader("Subject", subject)
-	m.SetBody("text/plain", body)
-
-	d := gomail.NewDialer(smtpServerAddress, smtpServerPort, user, password)
 	if err := d.DialAndSend(m); err != nil {
 		fmt.Println(err)
 		fmt.Println("")

@@ -1,0 +1,9 @@
+sender: sender@example.com
+recipient: recipient@example.com
+server: smtp.example.com
+port: 25
+server: smtp.example.com
+subject: Email subject
+body: Email body
+user:
+password: 
