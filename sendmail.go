@@ -8,9 +8,12 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
+	"net/smtp"
 	"os"
 
 	"gopkg.in/gomail.v2"
@@ -32,6 +35,7 @@ type Config struct {
 	Body      string `yaml:"body"`
 	User      string `yaml:"user"`
 	Password  string `yaml:"password"`
+	Ssl       bool
 }
 
 func main() {
@@ -46,9 +50,10 @@ func main() {
 		Body:      "Email body",
 		User:      "",
 		Password:  "",
+		Ssl:       false,
 	}
 
-	readConfFile(&conf)
+	readConfFiles(&conf)
 
 	sender := flag.String("from", conf.Sender, "sender email address")
 	recipient := flag.String("to", conf.Recipient, "recipient email address")
@@ -58,6 +63,7 @@ func main() {
 	subject := flag.String("subject", conf.Subject, "email subject")
 	user := flag.String("user", conf.User, "authentication user")
 	password := flag.String("password", conf.Password, "authentication password")
+	ssl := flag.Bool("ssl", conf.Ssl, "ssl")
 	flag.Parse()
 
 	conf.Sender = *sender
@@ -68,6 +74,7 @@ func main() {
 	conf.Subject = *subject
 	conf.User = *user
 	conf.Password = *password
+	conf.Ssl = *ssl
 
 	fmt.Printf("CONNECTING TO: %s:%d\n", conf.Server, conf.Port)
 	fmt.Printf("FROM: %s\n", conf.Sender)
@@ -87,9 +94,9 @@ func main() {
 	send(conf)
 }
 
-func readConfFile(conf *Config) {
+func readConfFile(filename string, conf *Config) {
 	// read conf file
-	yamlData, err := ioutil.ReadFile("sendmail.yml")
+	yamlData, err := ioutil.ReadFile(filename)
 	if err != nil {
 		fmt.Printf("error reading configuration file:\n\t%s\n", err)
 	} else {
@@ -102,6 +109,14 @@ func readConfFile(conf *Config) {
 	}
 }
 
+func readConfFiles(conf *Config) {
+	confFiles := [2]string{"sendmail.default.yml", "sendmail.yml"}
+	for _, filename := range confFiles {
+		readConfFile(filename, conf)
+	}
+
+}
+
 func send(conf Config) {
 	m := gomail.NewMessage()
 	m.SetHeader("From", conf.Sender)
@@ -109,18 +124,69 @@ func send(conf Config) {
 	m.SetHeader("Subject", conf.Subject)
 	m.SetBody("text/plain", conf.Body)
 
-	var d *gomail.Dialer
-	if isEmpty(conf.User) {
-		d = &gomail.Dialer{Host: conf.Server, Port: conf.Port}
-	} else {
-		d = gomail.NewDialer(conf.Server, conf.Port, conf.User, conf.Password)
-	}
-	if err := d.DialAndSend(m); err != nil {
-		fmt.Println(err)
-		fmt.Println("")
-		fmt.Println("")
-	}
+	if conf.Ssl {
+		// TLS config
+		tlsconfig := &tls.Config{
+			InsecureSkipVerify: true,
+			ServerName:         conf.Server,
+		}
 
-	fmt.Print("Press 'Enter' to continue...")
-	bufio.NewReader(os.Stdin).ReadBytes('\n')
+		conn, err := tls.Dial("tcp", conf.Server, tlsconfig)
+		if err != nil {
+			log.Panic(err)
+		}
+
+		c, err := smtp.NewClient(conn, conf.Server)
+		if err != nil {
+			log.Panic(err)
+		}
+
+		// Auth
+		if !isEmpty(conf.User) {
+			auth := smtp.PlainAuth("", conf.User, conf.Password, conf.Server)
+			if err = c.Auth(auth); err != nil {
+				log.Panic(err)
+			}
+			if err = c.Mail(conf.Sender); err != nil {
+				log.Panic(err)
+			}
+		}
+
+		if err = c.Rcpt(conf.Recipient); err != nil {
+			log.Panic(err)
+		}
+
+		// Data
+		w, err := c.Data()
+		if err != nil {
+			log.Panic(err)
+		}
+
+		_, err = w.Write([]byte(conf.Body)) // TODO: compose email
+		if err != nil {
+			log.Panic(err)
+		}
+
+		err = w.Close()
+		if err != nil {
+			log.Panic(err)
+		}
+
+		c.Quit()
+	} else {
+		var d *gomail.Dialer
+		if isEmpty(conf.User) {
+			d = &gomail.Dialer{Host: conf.Server, Port: conf.Port}
+		} else {
+			d = gomail.NewDialer(conf.Server, conf.Port, conf.User, conf.Password)
+		}
+		if err := d.DialAndSend(m); err != nil {
+			fmt.Println(err)
+			fmt.Println("")
+			fmt.Println("")
+		}
+
+		fmt.Print("Press 'Enter' to continue...")
+		bufio.NewReader(os.Stdin).ReadBytes('\n')
+	}
 }
